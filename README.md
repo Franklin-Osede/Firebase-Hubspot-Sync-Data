@@ -1,3 +1,5 @@
+
+
 This project synchronizes users from HubSpot to Firebase Firestore using Node.js, with the synchronization data coming from an Excel file. It implements batch synchronization to efficiently transfer contacts from HubSpot to a Firebase collection.
 
 Features
