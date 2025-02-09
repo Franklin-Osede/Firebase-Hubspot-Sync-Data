@@ -5,7 +5,7 @@ const path = require('path');
 exports.readExcel = async () => {
   try {
     // Ruta del archivo Excel
-    const filePath = path.resolve(__dirname, '../path/to/your/excel-file.xlsx');
+    const filePath = path.resolve(__dirname, '../hubspot_contacts.xlsx');
 
     // Leer el archivo Excel
     const fileBuffer = fs.readFileSync(filePath);
