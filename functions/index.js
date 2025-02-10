@@ -2,15 +2,15 @@ require('dotenv').config();
 const functions = require('firebase-functions');
 const syncUsersService = require('./services/syncUsersService');
 
-// Función HTTP existente para sincronizar usuarios desde Excel a Firebase
+// Existing HTTP function to synchronize users from Excel to Firebase
 exports.syncUsers = functions
   .runWith({
-    timeoutSeconds: 540, // 9 minutos
+    timeoutSeconds: 540, // 9 minutes
     memory: '1GB',
-    maxInstances: 1 // Asegurar que solo se ejecuta una instancia a la vez
+    maxInstances: 1 // Ensure that only one instance runs at a time.
   })
   .https.onRequest(async (req, res) => {
-    // Verificar método HTTP
+    // Check HTTP method.
     if (req.method !== 'POST') {
       return res.status(405).json({
         success: false,
@@ -21,20 +21,20 @@ exports.syncUsers = functions
     try {
       console.log('Iniciando proceso de sincronización...');
 
-      // Ejecutar la sincronización
+      // Run the synchronization.
       const result = await syncUsersService.syncUsersFromExcel();
 
-      // Procesar resultados
+      // Process results.
       if (result.success) {
         console.log(`Sincronización completada: ${result.updatedCount} actualizaciones, ${result.errorCount} errores`);
 
-        // Si hay errores, incluir solo los primeros 100 en la respuesta
+        // If there are errors, include only the first 100 in the response.
         if (result.errors && result.errors.length > 100) {
           result.errors = result.errors.slice(0, 100);
           result.message += ' (Mostrando primeros 100 errores)';
         }
 
-        // Enviar respuesta exitosa
+        // Send successful response.
         res.status(200).json({
           success: true,
           updatedCount: result.updatedCount,
@@ -44,7 +44,7 @@ exports.syncUsers = functions
           errors: result.errors || []
         });
       } else {
-        // Si la sincronización falló pero no lanzó una excepción
+        // If the synchronization failed but did not throw an exception.
         console.error('La sincronización falló:', result.error);
         res.status(500).json({
           success: false,
@@ -53,7 +53,7 @@ exports.syncUsers = functions
         });
       }
     } catch (error) {
-      // Manejar errores inesperados
+      // Handle unexpected errors.
       console.error('Error inesperado en la sincronización de usuarios:', error);
       res.status(500).json({
         success: false,
@@ -66,21 +66,21 @@ exports.syncUsers = functions
     }
   });
 
-// Nueva función programada para ejecutar cada 2 minutos
+// New scheduled function to run every 2 minutes.
 exports.scheduledSyncBatch = functions
   .runWith({
-    timeoutSeconds: 120, // 2 minutos
+    timeoutSeconds: 120, // 2 minutes
     memory: '256MB',
     maxInstances: 1
   })
   .pubsub.schedule('every 2 minutes')
-  .timeZone('Europe/Madrid')  // Zona horaria europea
+  .timeZone('Europe/Madrid')  // European time zone.
   .onRun(async (context) => {
     try {
       console.log('Iniciando sincronización programada de lote...');
       const result = await syncUsersService.syncNextBatch();
 
-      // Log detallado del resultado
+      // Detailed log of the result.
       if (result.success) {
         console.log(`Lote sincronizado exitosamente:
           - Procesados: ${result.batchProcessed}
