@@ -2,7 +2,7 @@ require('dotenv').config();
 const functions = require('firebase-functions');
 const syncUsersService = require('./services/syncUsersService');
 
-// Función para sincronizar usuarios desde Excel a Firebase
+// Función HTTP existente para sincronizar usuarios desde Excel a Firebase
 exports.syncUsers = functions
   .runWith({
     timeoutSeconds: 540, // 9 minutos
@@ -63,5 +63,39 @@ exports.syncUsers = functions
       });
     } finally {
       console.log('Proceso de sincronización finalizado');
+    }
+  });
+
+// Nueva función programada para ejecutar cada 2 minutos
+exports.scheduledSyncBatch = functions
+  .runWith({
+    timeoutSeconds: 120, // 2 minutos
+    memory: '256MB',
+    maxInstances: 1
+  })
+  .pubsub.schedule('every 2 minutes')
+  .timeZone('Europe/Madrid')  // Zona horaria europea
+  .onRun(async (context) => {
+    try {
+      console.log('Iniciando sincronización programada de lote...');
+      const result = await syncUsersService.syncNextBatch();
+
+      // Log detallado del resultado
+      if (result.success) {
+        console.log(`Lote sincronizado exitosamente:
+          - Procesados: ${result.batchProcessed}
+          - Total usuarios: ${result.totalUsers}
+          - Posición actual: ${result.currentPosition}
+          - Actualizados: ${result.updatedCount}
+          - Errores: ${result.errorCount}
+          - Tiempo: ${result.timeElapsedSeconds.toFixed(2)}s`);
+      } else {
+        console.error('Error en la sincronización del lote:', result.error);
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error inesperado en la sincronización programada:', error);
+      throw error;
     }
   });
