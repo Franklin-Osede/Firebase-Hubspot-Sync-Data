@@ -1,8 +1,8 @@
 require('dotenv').config();
 const admin = require('firebase-admin');
 const excelUtils = require('../utils/excelUtils');
-const { processBatch } = require('../utils/batchUtils');
 
+// Función para inicializar Firebase Admin
 function initializeFirebase() {
   if (!admin.apps.length) {
     const serviceAccount = {
@@ -26,71 +26,208 @@ function initializeFirebase() {
 
 initializeFirebase();
 
-const processUser = async (user) => {
-  const usersRef = admin.firestore().collection('users');
-
-  if (!user.email || !user.hubspotId) {
-    throw new Error('Registro incompleto');
+// Función para obtener la última posición sincronizada
+async function getLastSyncPosition() {
+  const db = admin.firestore();
+  const syncStateDoc = await db.collection('syncState').doc('lastPosition').get();
+  if (!syncStateDoc.exists) {
+    await db.collection('syncState').doc('lastPosition').set({ position: 0 });
+    return 0;
   }
+  return syncStateDoc.data().position;
+}
 
-  const snapshot = await usersRef.where('email', '==', user.email.toLowerCase()).get();
+// Función para actualizar la posición de sincronización
+async function updateSyncPosition(position) {
+  const db = admin.firestore();
+  await db.collection('syncState').doc('lastPosition').set({
+    position,
+    lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+  });
+}
 
-  if (!snapshot.empty) {
-    await snapshot.docs[0].ref.update({
-      hubspotId: user.hubspotId,
-      lastSyncedWithHubspot: new Date().toISOString(),
-    });
-    return { status: 'updated', email: user.email };
-  } else {
-    throw new Error(`Usuario no encontrado: ${user.email}`);
-  }
-};
-
+// Función original para sincronizar todos los usuarios
 exports.syncUsersFromExcel = async () => {
   try {
-    console.log('Iniciando sincronización de usuarios...');
-    const startTime = Date.now();
-
     // Leer los datos del archivo Excel
     const usersData = await excelUtils.readExcel();
-    console.log(`Leídos ${usersData.length} registros del Excel`);
 
-    // Procesar en lotes de 500 usuarios
-    const BATCH_SIZE = 500;
-    const results = await processBatch(usersData, BATCH_SIZE, processUser);
+    // Obtener la referencia a la colección de usuarios en Firestore
+    const usersRef = admin.firestore().collection('users');
 
-    const endTime = Date.now();
-    const timeElapsed = (endTime - startTime) / 1000;
+    let updatedCount = 0;
+    let errorCount = 0;
+    let errorEmails = [];
 
-    // Preparar resumen detallado
-    const summary = {
+    for (const user of usersData) {
+      if (!user.email || !user.hubspotId) {
+        console.warn(`Registro incompleto: ${JSON.stringify(user)}`);
+        errorCount++;
+        errorEmails.push({
+          email: user.email || 'No email',
+          error: 'Registro incompleto'
+        });
+        continue;
+      }
+
+      // Buscar el usuario en Firestore por correo electrónico
+      const snapshot = await usersRef.where('email', '==', user.email.toLowerCase()).get();
+
+      if (!snapshot.empty) {
+        // Actualizar el documento con el hubspotId y el timestamp de sincronización
+        await snapshot.docs[0].ref.update({
+          hubspotId: user.hubspotId,
+          lastSyncedWithHubspot: new Date().toISOString(),
+        });
+        updatedCount++;
+      } else {
+        console.log(`Usuario no encontrado en Firestore: ${user.email}`);
+        errorCount++;
+        errorEmails.push({
+          email: user.email,
+          error: 'Usuario no encontrado en Firestore'
+        });
+      }
+    }
+
+    return {
       success: true,
-      totalProcessed: usersData.length,
-      updatedCount: results.success.length,
-      errorCount: results.errors.length,
-      timeElapsedSeconds: timeElapsed,
-      ratePerSecond: (usersData.length / timeElapsed).toFixed(2),
-      errors: results.errors.map(e => ({
-        email: e.item.email,
-        error: e.error
-      })),
-      message: `Sincronización completada - Total: ${usersData.length}, Actualizados: ${results.success.length}, Errores: ${results.errors.length}, Tiempo: ${timeElapsed.toFixed(2)}s`
+      updatedCount,
+      errorCount,
+      errorEmails,
+      message: `Sincronización completada - Actualizados: ${updatedCount}, Errores: ${errorCount}`,
     };
-
-    // Guardar log detallado en Firestore
-    await admin.firestore().collection('syncLogs').add({
-      ...summary,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    return summary;
   } catch (error) {
     console.error('Error en la sincronización de usuarios:', error);
     return {
       success: false,
       error: error.message,
       updatedCount: 0,
+      errorCount: 0
+    };
+  }
+};
+
+// Nueva función para sincronizar por lotes
+exports.syncNextBatch = async () => {
+  try {
+    console.log('Iniciando sincronización del siguiente lote...');
+    const startTime = Date.now();
+
+    // Leer todos los usuarios del Excel
+    const allUsers = await excelUtils.readExcel();
+    console.log(`Total de usuarios en Excel: ${allUsers.length}`);
+
+    // Obtener la última posición sincronizada
+    const lastPosition = await getLastSyncPosition();
+    console.log(`Última posición sincronizada: ${lastPosition}`);
+
+    // Verificar si ya se completó la sincronización
+    if (lastPosition >= allUsers.length) {
+      console.log('Sincronización ya completada. No hay más usuarios para procesar.');
+      return {
+        success: true,
+        message: 'Sincronización ya completada anteriormente.',
+        position: allUsers.length,
+        status: 'COMPLETED'
+      };
+    }
+
+    // Calcular el siguiente lote de 50 usuarios
+    const batchSize = 50;
+    const endPosition = Math.min(lastPosition + batchSize, allUsers.length);
+    const usersBatch = allUsers.slice(lastPosition, endPosition);
+
+    if (usersBatch.length === 0) {
+      console.log('Sincronización completada. No hay más usuarios para procesar.');
+      return {
+        success: true,
+        message: 'Sincronización completada. Proceso finalizado.',
+        position: allUsers.length,
+        status: 'COMPLETED'
+      };
+    }
+
+    // Obtener referencia a la colección de usuarios
+    const usersRef = admin.firestore().collection('users');
+    let updatedCount = 0;
+    let errorCount = 0;
+    let errorEmails = [];
+
+    // Procesar el lote actual
+    for (const user of usersBatch) {
+      try {
+        if (!user.email || !user.hubspotId) {
+          console.warn(`Registro incompleto: ${JSON.stringify(user)}`);
+          errorCount++;
+          errorEmails.push({
+            email: user.email || 'No email',
+            error: 'Registro incompleto'
+          });
+          continue;
+        }
+
+        const snapshot = await usersRef.where('email', '==', user.email.toLowerCase()).get();
+
+        if (!snapshot.empty) {
+          await snapshot.docs[0].ref.update({
+            hubspotId: user.hubspotId,
+            lastSyncedWithHubspot: new Date().toISOString(),
+          });
+          updatedCount++;
+          console.log(`Usuario actualizado: ${user.email}`);
+        } else {
+          console.log(`Usuario no encontrado en Firestore: ${user.email}`);
+          errorCount++;
+          errorEmails.push({
+            email: user.email,
+            error: 'Usuario no encontrado en Firestore'
+          });
+        }
+      } catch (error) {
+        console.error(`Error procesando usuario ${user.email}:`, error);
+        errorCount++;
+        errorEmails.push({
+          email: user.email,
+          error: error.message
+        });
+      }
+    }
+
+    // Actualizar la posición para el siguiente lote
+    await updateSyncPosition(endPosition);
+
+    const endTime = Date.now();
+    const timeElapsed = (endTime - startTime) / 1000;
+
+    const result = {
+      success: true,
+      batchProcessed: usersBatch.length,
+      totalUsers: allUsers.length,
+      currentPosition: endPosition,
+      updatedCount,
+      errorCount,
+      errorEmails,
+      timeElapsedSeconds: timeElapsed,
+      status: endPosition >= allUsers.length ? 'COMPLETED' : 'IN_PROGRESS',
+      message: `Lote sincronizado - Procesados: ${usersBatch.length}, Actualizados: ${updatedCount}, Errores: ${errorCount}, Posición actual: ${endPosition}/${allUsers.length}`
+    };
+
+    // Guardar log en Firestore
+    await admin.firestore().collection('syncLogs').add({
+      ...result,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return result;
+  } catch (error) {
+    console.error('Error en la sincronización:', error);
+    return {
+      success: false,
+      error: error.message,
+      updatedCount: 0,
       errorCount: 0,
+      status: 'ERROR'
     };
   }
 };
