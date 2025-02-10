@@ -2,7 +2,7 @@ require('dotenv').config();
 const admin = require('firebase-admin');
 const excelUtils = require('../utils/excelUtils');
 
-// Función para inicializar Firebase Admin
+// Function to initialize Firebase
 function initializeFirebase() {
   if (!admin.apps.length) {
     const serviceAccount = {
@@ -26,7 +26,7 @@ function initializeFirebase() {
 
 initializeFirebase();
 
-// Función para obtener la última posición sincronizada
+// Function to obtain the last position synchronize
 async function getLastSyncPosition() {
   const db = admin.firestore();
   const syncStateDoc = await db.collection('syncState').doc('lastPosition').get();
@@ -37,7 +37,7 @@ async function getLastSyncPosition() {
   return syncStateDoc.data().position;
 }
 
-// Función para actualizar la posición de sincronización
+// Function to update the position position on syncronization
 async function updateSyncPosition(position) {
   const db = admin.firestore();
   await db.collection('syncState').doc('lastPosition').set({
@@ -46,13 +46,13 @@ async function updateSyncPosition(position) {
   });
 }
 
-// Función original para sincronizar todos los usuarios
+// Original function to sincronize all the users
 exports.syncUsersFromExcel = async () => {
   try {
-    // Leer los datos del archivo Excel
+    // Reads all the data from the excel
     const usersData = await excelUtils.readExcel();
 
-    // Obtener la referencia a la colección de usuarios en Firestore
+    // Get the reference of user´s colection on Firestore
     const usersRef = admin.firestore().collection('users');
 
     let updatedCount = 0;
@@ -70,11 +70,11 @@ exports.syncUsersFromExcel = async () => {
         continue;
       }
 
-      // Buscar el usuario en Firestore por correo electrónico
+      // Find the user in Firestore by email
       const snapshot = await usersRef.where('email', '==', user.email.toLowerCase()).get();
 
       if (!snapshot.empty) {
-        // Actualizar el documento con el hubspotId y el timestamp de sincronización
+        // Update the document with the hubspotId and the synchronization timestamp.
         await snapshot.docs[0].ref.update({
           hubspotId: user.hubspotId,
           lastSyncedWithHubspot: new Date().toISOString(),
@@ -108,21 +108,21 @@ exports.syncUsersFromExcel = async () => {
   }
 };
 
-// Nueva función para sincronizar por lotes
+//  New function to synchronize in batches.
 exports.syncNextBatch = async () => {
   try {
     console.log('Iniciando sincronización del siguiente lote...');
     const startTime = Date.now();
 
-    // Leer todos los usuarios del Excel
+    // Read all users from the Excel.
     const allUsers = await excelUtils.readExcel();
     console.log(`Total de usuarios en Excel: ${allUsers.length}`);
 
-    // Obtener la última posición sincronizada
+    // Read all users from the Excel file.
     const lastPosition = await getLastSyncPosition();
     console.log(`Última posición sincronizada: ${lastPosition}`);
 
-    // Verificar si ya se completó la sincronización
+    // Check if the synchronization has already been completed.
     if (lastPosition >= allUsers.length) {
       console.log('Sincronización ya completada. No hay más usuarios para procesar.');
       return {
@@ -133,7 +133,7 @@ exports.syncNextBatch = async () => {
       };
     }
 
-    // Calcular el siguiente lote de 50 usuarios
+    // Calculate the next batch of 50 users.
     const batchSize = 50;
     const endPosition = Math.min(lastPosition + batchSize, allUsers.length);
     const usersBatch = allUsers.slice(lastPosition, endPosition);
@@ -148,13 +148,13 @@ exports.syncNextBatch = async () => {
       };
     }
 
-    // Obtener referencia a la colección de usuarios
+    //Get reference to the users collection
     const usersRef = admin.firestore().collection('users');
     let updatedCount = 0;
     let errorCount = 0;
     let errorEmails = [];
 
-    // Procesar el lote actual
+    // Process the current batch.
     for (const user of usersBatch) {
       try {
         if (!user.email || !user.hubspotId) {
@@ -194,7 +194,7 @@ exports.syncNextBatch = async () => {
       }
     }
 
-    // Actualizar la posición para el siguiente lote
+    // Update the position for the next batch.
     await updateSyncPosition(endPosition);
 
     const endTime = Date.now();
@@ -213,7 +213,7 @@ exports.syncNextBatch = async () => {
       message: `Lote sincronizado - Procesados: ${usersBatch.length}, Actualizados: ${updatedCount}, Errores: ${errorCount}, Posición actual: ${endPosition}/${allUsers.length}`
     };
 
-    // Guardar log en Firestore
+    // Save log en Firestore
     await admin.firestore().collection('syncLogs').add({
       ...result,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
