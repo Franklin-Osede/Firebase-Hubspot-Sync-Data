@@ -1,4 +1,4 @@
-// Utilidad para procesar arrays en lotes
+// Process arrays on batches
 exports.processBatch = async (items, batchSize, processFunction) => {
   const results = {
     success: [],
@@ -19,7 +19,7 @@ exports.processBatch = async (items, batchSize, processFunction) => {
         })
       );
 
-      // Separar resultados exitosos y errores
+      // Separate successful results from failures
       batchResults.forEach(result => {
         if (result.success) {
           results.success.push(result);
@@ -28,7 +28,7 @@ exports.processBatch = async (items, batchSize, processFunction) => {
         }
       });
 
-      // Esperar un poco entre lotes para no sobrecargar Firestore
+      // Wait sometime between batches so I do not overload Firestore 
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
       console.error(`Error procesando lote ${i}-${i + batchSize}:`, error);
